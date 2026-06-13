@@ -35,6 +35,5 @@ export default defineConfig({
     sourcemap: false,
   },
   assetsInclude: ['**/*.glb'],
-  // GitHub Pages 部署基础路径（如需要，取消注释并修改）
-  // base: '/your-repo-name/',
+  base: '/3d-anatomy-viewer/',
 });
