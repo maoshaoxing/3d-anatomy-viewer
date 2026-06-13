@@ -1,5 +1,5 @@
-import React, { Suspense, useRef, useState, useCallback, useEffect } from 'react';
-import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
+import React, { Suspense, useRef, useState, useCallback, useEffect, Component } from 'react';
+import { Canvas, useFrame, ThreeEvent } from '@react-three/fiber';
 import {
   OrbitControls,
   useGLTF,
@@ -13,34 +13,26 @@ import {
 import * as THREE from 'three';
 import type { SceneFeatures, HighlightInfo } from '../types';
 import { viewPresets as presetData } from '../data/organs';
-import type { ViewPreset } from '../types';
 
 // ============================================================
-// 默认占位模型（无 GLB 时显示）
+// 占位模型（无 GLB 或加载失败时显示）
 // ============================================================
 function PlaceholderModel() {
   const meshRef = useRef<THREE.Mesh>(null);
   useFrame((_, delta) => {
-    if (meshRef.current) {
-      meshRef.current.rotation.y += delta * 0.3;
-    }
+    if (meshRef.current) meshRef.current.rotation.y += delta * 0.3;
   });
   return (
     <mesh ref={meshRef} castShadow>
       <torusKnotGeometry args={[1.2, 0.4, 128, 32]} />
-      <meshStandardMaterial
-        color="#3a6aff"
-        metalness={0.3}
-        roughness={0.5}
-        emissive="#1a3a80"
-        emissiveIntensity={0.2}
-      />
+      <meshStandardMaterial color="#3a6aff" metalness={0.3} roughness={0.5}
+        emissive="#1a3a80" emissiveIntensity={0.2} />
     </mesh>
   );
 }
 
 // ============================================================
-// 加载器
+// 加载进度
 // ============================================================
 function Loader() {
   const { progress, active } = useProgress();
@@ -49,7 +41,7 @@ function Loader() {
     <Html center>
       <div style={{ color: '#7cb8ff', fontFamily: 'monospace', fontSize: 14, textAlign: 'center' }}>
         <div style={{ fontSize: 36, marginBottom: 8 }}>🧬</div>
-        <div>加载模型... {progress.toFixed(0)}%</div>
+        <div>加载中... {progress.toFixed(0)}%</div>
         <div style={{ width: 160, height: 3, background: 'rgba(100,160,255,0.1)', margin: '10px auto', borderRadius: 2 }}>
           <div style={{ width: `${progress}%`, height: '100%', background: 'linear-gradient(90deg, #4af, #7cb8ff)', borderRadius: 2, transition: 'width 0.3s' }} />
         </div>
@@ -59,17 +51,11 @@ function Loader() {
 }
 
 // ============================================================
-// 模型组件
+// 模型组件 — 无 hooks 违规，useGLTF 在最外层调用
 // ============================================================
 function Model({
-  path,
-  wireframe,
-  transparent,
-  transparency,
-  clippingEnabled,
-  onHoverParts,
-  onSelectPart,
-  onLoadError,
+  path, wireframe, transparent, transparency, clippingEnabled,
+  onHoverParts, onSelectPart,
 }: {
   path: string;
   wireframe: boolean;
@@ -78,21 +64,8 @@ function Model({
   clippingEnabled: boolean;
   onHoverParts: (info: HighlightInfo | null) => void;
   onSelectPart: (info: HighlightInfo | null) => void;
-  onLoadError: () => void;
 }) {
-  const [loadFailed, setLoadFailed] = useState(false);
-  let scene: THREE.Group | null = null;
-
-  try {
-    const result = useGLTF(path);
-    scene = result.scene;
-  } catch {
-    if (!loadFailed) {
-      setLoadFailed(true);
-      onLoadError();
-    }
-  }
-
+  const { scene } = useGLTF(path);
   const groupRef = useRef<THREE.Group>(null);
   const meshMapRef = useRef<Map<string, THREE.Mesh>>(new Map());
   const originalMaterials = useRef<Map<string, THREE.Material | THREE.Material[]>>(new Map());
@@ -105,107 +78,89 @@ function Model({
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const s = maxDim > 0 ? 3 / maxDim : 1;
+    const s = maxDim > 0.001 ? 3 / maxDim : 1;
     groupRef.current.position.set(-center.x * s, -center.y * s, -center.z * s);
     groupRef.current.scale.setScalar(s);
   }, [scene]);
 
-  // 收集 Mesh 并存储原始材质
+  // 收集 mesh 信息
   useEffect(() => {
     if (!scene) return;
     meshMapRef.current.clear();
     originalMaterials.current.clear();
     scene.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        const id = mesh.uuid;
-        meshMapRef.current.set(id, mesh);
-        const mat = mesh.material;
-        if (Array.isArray(mat)) {
-          originalMaterials.current.set(id, mat.map((m) => m.clone()));
-        } else {
-          originalMaterials.current.set(id, mat.clone());
-        }
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
+        const m = child as THREE.Mesh;
+        meshMapRef.current.set(m.uuid, m);
+        const rm = m.material;
+        originalMaterials.current.set(m.uuid, Array.isArray(rm) ? rm.map((x) => (x as THREE.Material).clone()) : (rm as THREE.Material).clone());
+        m.castShadow = true;
+        m.receiveShadow = true;
       }
     });
   }, [scene]);
 
   // 线框
   useEffect(() => {
-    meshMapRef.current.forEach((mesh) => {
-      const apply = (m: THREE.Material) => { m.wireframe = wireframe; m.needsUpdate = true; };
-      if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
-      else apply(mesh.material);
+    meshMapRef.current.forEach((m) => {
+      const f = (mat: THREE.Material) => { mat.wireframe = wireframe; mat.needsUpdate = true; };
+      if (Array.isArray(m.material)) m.material.forEach(f);
+      else f(m.material);
     });
   }, [wireframe]);
 
   // 半透明
   useEffect(() => {
-    meshMapRef.current.forEach((mesh) => {
-      const apply = (m: THREE.Material) => {
-        m.transparent = transparent;
-        m.opacity = transparent ? transparency : 1;
-        m.depthWrite = !transparent || transparency > 0.7;
-        m.needsUpdate = true;
+    meshMapRef.current.forEach((m) => {
+      const f = (mat: THREE.Material) => {
+        mat.transparent = transparent;
+        mat.opacity = transparent ? transparency : 1;
+        mat.depthWrite = !transparent || transparency > 0.7;
+        mat.needsUpdate = true;
       };
-      if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
-      else apply(mesh.material);
+      if (Array.isArray(m.material)) m.material.forEach(f);
+      else f(m.material);
     });
   }, [transparent, transparency]);
 
   // 剖切
   useEffect(() => {
-    meshMapRef.current.forEach((mesh) => {
-      if (clippingEnabled) {
-        mesh.material.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)];
-      } else {
-        mesh.material.clippingPlanes = null;
-      }
-      mesh.material.needsUpdate = true;
+    meshMapRef.current.forEach((m) => {
+      m.material.clippingPlanes = clippingEnabled ? [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)] : null;
+      m.material.needsUpdate = true;
     });
   }, [clippingEnabled]);
 
-  // 鼠标事件
+  // 鼠标交互
+  const emitHover = useCallback((mesh: THREE.Mesh, on: boolean) => {
+    const f = (m: THREE.Material) => { m.emissive = on ? new THREE.Color('#3a6aff') : new THREE.Color('#000'); m.emissiveIntensity = on ? 0.3 : 0; m.needsUpdate = true; };
+    if (Array.isArray(mesh.material)) mesh.material.forEach(f); else f(mesh.material);
+  }, []);
+
   const handlePointerOver = useCallback((e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
-    const mesh = e.object as THREE.Mesh;
-    const apply = (m: THREE.Material) => { m.emissive = new THREE.Color('#3a6aff'); m.emissiveIntensity = 0.3; m.needsUpdate = true; };
-    if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
-    else apply(mesh.material);
-    const wp = new THREE.Vector3(); mesh.getWorldPosition(wp);
-    onHoverParts({ id: mesh.uuid, name: mesh.name || '结构', position: [wp.x, wp.y, wp.z] });
-  }, [onHoverParts]);
+    const m = e.object as THREE.Mesh;
+    emitHover(m, true);
+    const wp = new THREE.Vector3(); m.getWorldPosition(wp);
+    onHoverParts?.({ id: m.uuid, name: m.name || '结构', position: [wp.x, wp.y, wp.z] });
+  }, [onHoverParts, emitHover]);
 
   const handlePointerOut = useCallback((e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
-    const mesh = e.object as THREE.Mesh;
-    const apply = (m: THREE.Material) => { m.emissive = new THREE.Color('#000'); m.emissiveIntensity = 0; m.needsUpdate = true; };
-    if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
-    else apply(mesh.material);
-    onHoverParts(null);
-  }, [onHoverParts]);
+    emitHover(e.object as THREE.Mesh, false);
+    onHoverParts?.(null);
+  }, [onHoverParts, emitHover]);
 
   const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
-    const mesh = e.object as THREE.Mesh;
-    meshMapRef.current.forEach((m) => {
-      if (m !== mesh) {
-        const apply = (mat: THREE.Material) => { mat.emissive = new THREE.Color('#000'); mat.emissiveIntensity = 0; mat.needsUpdate = true; };
-        if (Array.isArray(m.material)) m.material.forEach(apply);
-        else apply(m.material);
-      }
-    });
-    const apply = (m: THREE.Material) => { m.emissive = new THREE.Color('#4a9fff'); m.emissiveIntensity = 0.5; m.needsUpdate = true; };
-    if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
-    else apply(mesh.material);
-    setSelectedMesh(mesh.uuid);
-    const wp = new THREE.Vector3(); mesh.getWorldPosition(wp);
-    onSelectPart({ id: mesh.uuid, name: mesh.name || '结构', position: [wp.x, wp.y, wp.z] });
-  }, [onSelectPart]);
-
-  if (loadFailed || !scene) return null;
+    const m = e.object as THREE.Mesh;
+    meshMapRef.current.forEach((x) => { if (x !== m) emitHover(x, false); });
+    const f = (mat: THREE.Material) => { mat.emissive = new THREE.Color('#4a9fff'); mat.emissiveIntensity = 0.5; mat.needsUpdate = true; };
+    if (Array.isArray(m.material)) m.material.forEach(f); else f(m.material);
+    setSelectedMesh(m.uuid);
+    const wp = new THREE.Vector3(); m.getWorldPosition(wp);
+    onSelectPart?.({ id: m.uuid, name: m.name || '结构', position: [wp.x, wp.y, wp.z] });
+  }, [onSelectPart, emitHover]);
 
   return (
     <group ref={groupRef}>
@@ -216,6 +171,16 @@ function Model({
       )}
     </group>
   );
+}
+
+// ============================================================
+// ErrorBoundary
+// ============================================================
+class ModelErrorBoundary extends Component<{ onError: () => void; children: React.ReactNode }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch() { this.props.onError(); }
+  render() { return this.state.hasError ? null : this.props.children; }
 }
 
 // ============================================================
@@ -238,7 +203,7 @@ function Lighting() {
 // ============================================================
 // 相机控制
 // ============================================================
-function CameraController({ viewPreset, onReady }: { viewPreset: string | null; onReady?: () => void }) {
+function CameraController({ viewPreset }: { viewPreset: string | null }) {
   const controlsRef = useRef<any>(null);
   useEffect(() => {
     if (viewPreset && controlsRef.current) {
@@ -247,7 +212,6 @@ function CameraController({ viewPreset, onReady }: { viewPreset: string | null; 
         controlsRef.current.target.set(0, 0, 0);
         controlsRef.current.object.position.set(...preset.position);
         controlsRef.current.update();
-        onReady?.();
       }
     }
   }, [viewPreset]);
@@ -256,15 +220,15 @@ function CameraController({ viewPreset, onReady }: { viewPreset: string | null; 
 }
 
 // ============================================================
-// 无模型提示
+// 无模型提示文字
 // ============================================================
 function NoModelHint() {
   return (
     <Html center style={{ pointerEvents: 'none' }}>
-      <div style={{ textAlign: 'center', color: 'rgba(180,200,240,0.5)', fontFamily: 'monospace' }}>
+      <div style={{ textAlign: 'center', color: 'rgba(180,200,240,0.45)', fontFamily: 'monospace' }}>
         <div style={{ fontSize: 48, marginBottom: 12 }}>🧬</div>
-        <div style={{ fontSize: 16, marginBottom: 4 }}>暂无 3D 模型</div>
-        <div style={{ fontSize: 12, opacity: 0.6 }}>将 GLB 文件放入 public/models/ 后刷新</div>
+        <div style={{ fontSize: 16 }}>暂无 3D 模型</div>
+        <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>将 GLB 放入 public/models/ 后推送即可</div>
       </div>
     </Html>
   );
@@ -283,12 +247,8 @@ interface Scene3DProps {
 }
 
 export const Scene3D: React.FC<Scene3DProps> = ({
-  modelPath,
-  features,
-  viewPreset,
-  onViewApplied,
-  onHoverParts,
-  onSelectPart,
+  modelPath, features, viewPreset, onViewApplied,
+  onHoverParts, onSelectPart,
 }) => {
   const [loadError, setLoadError] = useState(false);
   const hasModel = !!modelPath;
@@ -304,24 +264,29 @@ export const Scene3D: React.FC<Scene3DProps> = ({
         toneMappingExposure: 1.1,
         localClippingEnabled: features.clipping,
         powerPreference: 'high-performance',
+        failIfMajorPerformanceCaveat: false,
       }}
-      style={{ background: '#080c14' }}
+      style={{ width: '100%', height: '100%', display: 'block' }}
+      onCreated={({ gl }) => {
+        gl.setClearColor(new THREE.Color('#080c14'));
+      }}
     >
       <Lighting />
 
       <Suspense fallback={<Loader />}>
         {hasModel ? (
-          <Model
-            key={modelPath}
-            path={modelPath}
-            wireframe={features.wireframe}
-            transparent={features.transparent}
-            transparency={features.transparency}
-            clippingEnabled={features.clipping}
-            onHoverParts={onHoverParts}
-            onSelectPart={onSelectPart}
-            onLoadError={() => setLoadError(true)}
-          />
+          <ModelErrorBoundary onError={() => setLoadError(true)}>
+            <Model
+              key={modelPath}
+              path={modelPath}
+              wireframe={features.wireframe}
+              transparent={features.transparent}
+              transparency={features.transparency}
+              clippingEnabled={features.clipping}
+              onHoverParts={onHoverParts}
+              onSelectPart={onSelectPart}
+            />
+          </ModelErrorBoundary>
         ) : (
           <PlaceholderModel />
         )}
@@ -337,7 +302,7 @@ export const Scene3D: React.FC<Scene3DProps> = ({
 
       <ContactShadows position={[0, -1.5, 0]} opacity={0.25} scale={10} blur={2.5} far={4} />
       <Environment preset="city" />
-      <CameraController viewPreset={viewPreset} onReady={onViewApplied} />
+      <CameraController viewPreset={viewPreset} />
     </Canvas>
   );
 };
