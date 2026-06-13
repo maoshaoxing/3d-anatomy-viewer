@@ -2,6 +2,8 @@
 
 基于 Three.js + React + Remotion 的 3D 器官/细胞交互漫游与视频渲染系统。
 
+**🌐 在线体验：https://maoshaoxing.github.io/3d-anatomy-viewer/**
+
 ## 目录结构
 
 ```
