@@ -1,0 +1,200 @@
+&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;
+&lt;!DOCTYPE FilterScript&gt;
+&lt;!--
+MeshLab 模型优化滤镜脚本
+==========================
+执行顺序：减面 → 修复破面 → 重置坐标 → 统一单位
+适用：MeshLab 2022.02+
+调用：meshlabserver -i input.glb -o output.glb -s optimize_model.mlx
+--&gt;
+&lt;FilterScript&gt;
+
+  &lt;!-- ============================================================ --&gt;
+  &lt;!-- 步骤 1：减面（Quadric Edge Collapse Decimation）           --&gt;
+  &lt;!-- ============================================================ --&gt;
+  &lt;filter name=&quot;Quadric Edge Collapse Decimation&quot;&gt;
+    &lt;Param type=&quot;RichInt&quot;
+           name=&quot;TargetFaceNum&quot;
+           value=&quot;20000&quot;
+           description=&quot;目标面数（根据模型复杂度调整：器官 2-5万，细胞 5千-1万）&quot;/&gt;
+    &lt;Param type=&quot;RichFloat&quot;
+           name=&quot;TargetPerc&quot;
+           value=&quot;0&quot;
+           description=&quot;目标百分比（0=按面数，非0=按比例，二选一）&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;QualityThr&quot;
+           value=&quot;true&quot;
+           description=&quot;启用质量阈值保护，避免过度减面导致形变&quot;/&gt;
+    &lt;Param type=&quot;RichFloat&quot;
+           name=&quot;QualityThrValue&quot;
+           value=&quot;0.3&quot;
+           description=&quot;质量阈值（0-1，值越高保留越多细节）&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;PreserveBoundary&quot;
+           value=&quot;true&quot;
+           description=&quot;保留边界边，防止模型边缘被破坏&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;BoundaryWeight&quot;
+           value=&quot;true&quot;
+           description=&quot;边界边加权保护&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;PreserveNormal&quot;
+           value=&quot;true&quot;
+           description=&quot;保留法线方向&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;PreserveTopology&quot;
+           value=&quot;false&quot;
+           description=&quot;不限制拓扑（允许改变拓扑以大幅减面）&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;OptimalPlacement&quot;
+           value=&quot;true&quot;
+           description=&quot;最优顶点放置，减少误差&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;PlanarQuadric&quot;
+           value=&quot;true&quot;
+           description=&quot;平面二次误差度量，适合平坦区域&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;QualityWeight&quot;
+           value=&quot;false&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;AutoClean&quot;
+           value=&quot;true&quot;
+           description=&quot;减面后自动清理孤立顶点&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;!-- ============================================================ --&gt;
+  &lt;!-- 步骤 2：修复破面（合并重合顶点 &amp; 删除孤立面）             --&gt;
+  &lt;!-- ============================================================ --&gt;
+  &lt;filter name=&quot;Merge Close Vertices&quot;&gt;
+    &lt;Param type=&quot;RichFloat&quot;
+           name=&quot;Threshold&quot;
+           value=&quot;0.0001&quot;
+           description=&quot;合并距离阈值（米），小于此距离的顶点合并为一个&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;filter name=&quot;Remove Isolated pieces (wrt Diameter)&quot;&gt;
+    &lt;Param type=&quot;RichFloat&quot;
+           name=&quot;MinComponentDiag&quot;
+           value=&quot;1.0&quot;
+           description=&quot;最小组件直径百分比，小于此值的独立碎片被删除&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;filter name=&quot;Remove Duplicate Faces&quot;&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;filter name=&quot;Remove Duplicated Vertices&quot;&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;filter name=&quot;Remove Zero Area Faces&quot;&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;filter name=&quot;Remove Unreferenced Vertices&quot;&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;!-- 补洞（小孔） --&gt;
+  &lt;filter name=&quot;Close Holes&quot;&gt;
+    &lt;Param type=&quot;RichInt&quot;
+           name=&quot;MaxHoleSize&quot;
+           value=&quot;30&quot;
+           description=&quot;最大补洞边数，超过此值的孔洞不修复（避免误封开口）&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;NewFaceSelected&quot;
+           value=&quot;false&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;SelfIntersection&quot;
+           value=&quot;true&quot;
+           description=&quot;检查自相交&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;!-- 重建法线 --&gt;
+  &lt;filter name=&quot;Recompute Face Normals&quot;&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;filter name=&quot;Recompute Vertex Normals&quot;&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;!-- ============================================================ --&gt;
+  &lt;!-- 步骤 3：重置坐标系（模型居中，底部对齐原点）               --&gt;
+  &lt;!-- ============================================================ --&gt;
+  &lt;filter name=&quot;Transform: Move to Center of bbox&quot;&gt;
+    &lt;Param type=&quot;RichString&quot;
+           name=&quot;TransformAxis&quot;
+           value=&quot;XYZ&quot;
+           description=&quot;在所有轴上居中&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;filter name=&quot;Transform: Translate, Center, set Origin&quot;&gt;
+    &lt;Param type=&quot;RichEnum&quot;
+           name=&quot;targetCoord&quot;
+           value=&quot;origin&quot;
+           description=&quot;将物体底部移到原点（Y 最小值 = 0）&quot;/&gt;
+    &lt;Param type=&quot;RichEnum&quot;
+           name=&quot;axis&quot;
+           value=&quot;Y&quot;
+           description=&quot;沿 Y 轴对齐底部&quot;/&gt;
+    &lt;Param type=&quot;RichEnum&quot;
+           name=&quot;method&quot;
+           value=&quot;min&quot;
+           description=&quot;BoundingBox 最小值对齐原点&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;allLayers&quot;
+           value=&quot;true&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;!-- ============================================================ --&gt;
+  &lt;!-- 步骤 4：统一单位（米制 1:1）                                --&gt;
+  &lt;!-- ============================================================ --&gt;
+  &lt;filter name=&quot;Transform: Scale&quot;&gt;
+    &lt;Param type=&quot;RichString&quot;
+           name=&quot;ScaleAxis&quot;
+           value=&quot;1.0 1.0 1.0&quot;
+           description=&quot;保持当前缩放（单位已在 Blender 中校准为米）&quot;/&gt;
+    &lt;Param type=&quot;RichEnum&quot;
+           name=&quot;UnitFlag&quot;
+           value=&quot;None&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;UniformFlag&quot;
+           value=&quot;true&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Freeze&quot;
+           value=&quot;true&quot;
+           description=&quot;冻结变换矩阵，重置为单位矩阵&quot;/&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+  &lt;/filter&gt;
+
+  &lt;!-- ============================================================ --&gt;
+  &lt;!-- 步骤 5（可选）：法线方向统一                                --&gt;
+  &lt;!-- ============================================================ --&gt;
+  &lt;filter name=&quot;Re-Orient all faces coherently&quot;&gt;
+    &lt;Param type=&quot;RichBool&quot;
+           name=&quot;Selected&quot;
+           value=&quot;false&quot;/&gt;
+  &lt;/filter&gt;
+
+&lt;/FilterScript&gt;
